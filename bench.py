@@ -247,95 +247,8 @@ def generate_gym_game(players, progress_bar):
     progress_bar.update()
     return game
 
-# @gen.coroutine
-# def generate_daide_game(players, progress_bar):
-#     global _server
-#
-#     """ Generate a game """
-#     max_number_of_year = 35
-#     max_year = 1900 + max_number_of_year
-#
-#     players_ordering = list(range(len(players)))
-#     shuffle(players_ordering)
-#     power_names = Map().powers
-#     clients = {power_names[idx]: ClientPlayer(player, None) for idx, player in zip(players_ordering, players)}
-#     nb_regular_player = 0
-#
-#     server_game = ServerGame(n_controls=len(players), rules=['NO_PRESS', 'IGNORE_ERRORS', 'POWER_CHOICE'])
-#     server_game.server = _server
-#
-#     _server.add_new_game(server_game)
-#
-#     for power_name, (player, _) in clients.items():
-#         if isinstance(player, Player):
-#             username = 'user{}'.format(power_name)
-#             password = 'password'
-#             connection = yield connect(HOSTNAME, MAIN_PORT)
-#             user_channel = yield connection.authenticate(username, password,
-#                                                          create_user=not _server.users.has_user(username, password))
-#             user_game = yield user_channel.join_game(game_id=server_game.game_id, power_name=power_name)
-#             clients[power_name] = ClientPlayer(player, user_game)
-#             nb_regular_player += 1
-#
-#     if nb_regular_player < len(clients):
-#         _server.start_new_daide_server(server_game.game_id, port=serving_port)
-#         yield gen.sleep(10)
-#
-#     for power_name, (player, _) in clients.items():
-#         if not isinstance(player, Player):
-#             # launch daide
-#             serving_port = PORTS_POOL.pop(0)
-#             OPEN_PORTS.append(serving_port)
-#             clients[power_name] = ClientPlayer(player, process)
-#
-#     daide_connected = server_game.status == strings.ACTIVE
-#     while not daide_connected:
-#         print('Waiting for DAIDE to connect')
-#         yield gen.sleep(10)
-#         daide_connected = server_game.status == strings.ACTIVE
-#
-#     try:
-#         phase = PhaseSplit.split(server_game.get_current_phase())
-#         while server_game.status != strings.COMPLETED and phase.year <= max_year:
-#             print('\n=== NEW PHASE ===\n')
-#             print(server_game.get_current_phase())
-#
-#             yield [client.game.wait() for power_name, client in clients.items()]
-#
-#             remaining_powers = [power_name for power_name, _ in clients.items()
-#                                 if not server_game.get_power(power_name).order_is_set]
-#
-#             while remaining_powers:
-#                 players_orders = yield [player.get_orders(server_game, power_name)
-#                                         for power_name, (player, _) in clients.items() if power_name in remaining_powers]
-#
-#                 yield [game.set_orders(orders=orders)
-#                        for (_, (_, game)), orders in zip(clients.items(), players_orders)]
-#
-#                 remaining_powers = [power_name for power_name, _ in clients.items()
-#                                     if not server_game.get_power(power_name).order_is_set]
-#
-#             print('Orders sent')
-#
-#             yield [client.game.no_wait() for power_name, client in clients.items()]
-#
-#             while server_game.status != strings.COMPLETED and phase.in_str == server_game.get_current_phase():
-#                 print('Waiting for DAIDE orders')
-#                 yield gen.sleep(10)
-#
-#             phase = PhaseSplit.split(server_game.get_current_phase())
-#
-#     except Exception as exception:
-#         print('Exception: ', exception)
-#     finally:
-#         _server.stop_daide_server(server_game.game_id)
-#
-#     server_game['assigned_powers'] = list(clients.keys())
-#     progress_bar.update()
-#     return server_game
-
 @gen.coroutine
-def generate_daide_game(players, progress_bar):
+def generate_daide_game(players, progress_bar, daide_rules):
     """ Generate a game """
     global _server
 
@@ -350,7 +263,7 @@ def generate_daide_game(players, progress_bar):
     nb_regular_players = 1
 
     server_game = ServerGame(n_controls=nb_daide_players + nb_regular_players,
-                             rules=['NO_PRESS', 'IGNORE_ERRORS', 'POWER_CHOICE'])
+                             rules=daide_rules)
     server_game.server = _server
 
     _server.add_new_game(server_game)

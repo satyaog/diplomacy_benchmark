@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=DIPLOMACY_BENCH.model_v_model.py
-#SBATCH --array=1-20
+#SBATCH --array=1-20%1
 
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
@@ -34,7 +34,7 @@ touch $STD_ERR
 
 cd $GAME_DIR
 
-pyenv activate diplomacy_bench_daide
+pyenv activate diplomacy_bench
 module load singularity/3.1.1
 
 WORKING_DIR=$WORKING_DIR python $SCRIPT_PATH/$SCRIPT.py --games=50 >> $STD_OUT 2>> $STD_ERR

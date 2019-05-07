@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=DIPLOMACY_BENCH.model_v_daide.py
-#SBATCH --array=1-200
+#SBATCH --array=1-200%1
 
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
@@ -9,10 +9,11 @@ SCRIPT=bench_model_v_daide
 SCRIPT_PATH="$(cd $(dirname $SCRIPT.py);pwd)"
 
 PROJ_PATH=$1
+NO_PRESS=$2
 WORKING_DIR=/Tmp/$USER/slurm-$SLURM_JOB_ID/diplomacy
 
-STD_OUT=$PROJ_PATH/results/$SCRIPT.stats.$SLURM_ARRAY_TASK_ID
-STD_ERR=$PROJ_PATH/results/$SCRIPT.log.$SLURM_ARRAY_TASK_ID
+STD_OUT=$PROJ_PATH/results/$SCRIPT.$NO_PRESS.stats.$SLURM_ARRAY_TASK_ID
+STD_ERR=$PROJ_PATH/results/$SCRIPT.$NO_PRESS.log.$SLURM_ARRAY_TASK_ID
 GAME_DIR=$PROJ_PATH/results/games_$SCRIPT
 
 echo PROJ_PATH=$PROJ_PATH
@@ -37,6 +38,10 @@ cd $GAME_DIR
 pyenv activate diplomacy_bench_daide
 module load singularity/3.1.1
 
-WORKING_DIR=$WORKING_DIR python $SCRIPT_PATH/$SCRIPT.py --model-ai=supervised --games=5 >> $STD_OUT 2>> $STD_ERR
+if [ -z "$NO_PRESS" ]; then
+  WORKING_DIR=$WORKING_DIR python $SCRIPT_PATH/$SCRIPT.py --model-ai=supervised --games=5 >> $STD_OUT 2>> $STD_ERR
+else
+  WORKING_DIR=$WORKING_DIR python $SCRIPT_PATH/$SCRIPT.py --model-ai=supervised --no-press --games=5 >> $STD_OUT 2>> $STD_ERR
+fi
 
 kill -9 $(pgrep tensorflow_mode)

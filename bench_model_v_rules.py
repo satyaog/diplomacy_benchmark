@@ -5,11 +5,11 @@ from tornado import gen
 from diplomacy_research.players.player import Player
 from diplomacy_research.utils.cluster import is_port_opened, kill_processes_using_port, start_io_loop, stop_io_loop
 
-from bench import create_player, generate_gym_game, run_benchmark, MODEL_AI_URL_BUILDER, NON_MODEL_AI, OPEN_PORTS
+from research.bench import create_player, generate_gym_game, run_benchmark, MODEL_AI_URL, NON_MODEL_AI, OPEN_PORTS
 
-model_ai_names = sorted(name for name in MODEL_AI_URL_BUILDER
+model_ai_names = sorted(name for name in MODEL_AI_URL
                  if name.islower() and not name.startswith("__")
-                 and isinstance(MODEL_AI_URL_BUILDER[name], str))
+                 and isinstance(MODEL_AI_URL[name], str))
 non_model_ai_names = sorted(name for name in NON_MODEL_AI
                      if name.islower() and not name.startswith("__")
                      and isinstance(NON_MODEL_AI[name], Player))
@@ -34,7 +34,7 @@ def main():
     """ Entry point """
     print('--model-ai=[{}] --non-model-ai=[{}] --games=[{}]'.format(args.model_ai, args.non_model_ai, args.games))
     try:
-        player = yield create_player(args.model_ai, MODEL_AI_URL_BUILDER[args.model_ai], clean_dir=False)
+        player = yield create_player(args.model_ai, MODEL_AI_URL[args.model_ai], clean_dir=False)
         opponent = NON_MODEL_AI[args.non_model_ai]
         yield run_benchmark(generate_gym_game, '1[{}]v6[{}]'.format(args.model_ai, args.non_model_ai), args.games, player, opponent)
         yield run_benchmark(generate_gym_game, '1[{}]v6[{}]'.format(args.non_model_ai, args.model_ai), args.games, opponent, player)
