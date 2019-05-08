@@ -11,8 +11,8 @@ import zipfile
 
 import gym
 from tornado import gen
+from tornado.concurrent import Future
 from tornado.ioloop import TimeoutError
-from tqdm import tqdm
 import ujson as json
 
 from diplomacy import Game, Map, Server
@@ -36,10 +36,8 @@ from diplomacy_research.utils.cluster import is_port_opened, kill_processes_usin
 from diplomacy_research.utils.process import start_tf_serving, download_file, kill_subprocesses_on_exit
 from diplomacy_research.settings import WORKING_DIR
 
-ModelURLBuilder = namedtuple("ModelURLBuilder", ["url", "builder"])
-ModelBuilder = namedtuple("ModelBuilder", ["PolicyAdapter", "BaseDatasetBuilder"])
-ClientPlayer = namedtuple("ClientPlayer", ["player", "game"])
-DaidePlayer = namedtuple("DaidePlayer", ["player", "process"])
+ClientWrapper = namedtuple("ClientWrapper", ["player", "channel_game"])
+DaideWrapper = namedtuple("DaideWrapper", ["player", "process"])
 
 LOGGER = logging.getLogger('diplomacy_research.scripts.launch_bot')
 PERIOD_SECONDS = 10
@@ -53,31 +51,174 @@ DROPOUT_RATE = 0.
 USE_BEAM = False
 
 _server = None
+_client_channel = None
 _unsync_wait = 0
 HOSTNAME = 'localhost'
 MAIN_PORT = 9456
 
-MODEL_AI_URL_BUILDER = {
-    'reinforcement': ModelURLBuilder('https://storage.googleapis.com/ppaquette-diplomacy/'
-                                     'files/prev_models/20190116-model-order-v12-epoch18-'
-                                     '4ced2c4-rl-015251.zip',
-                                     ModelBuilder(OrderPolicyAdapter, OrderBaseDatasetBuilder)),
-    'supervised': ModelURLBuilder('http://storage.googleapis.com/ppaquette-diplomacy/'
-                                  'files/latest_model.zip',
-                                  ModelBuilder(OrderPolicyAdapter, OrderBaseDatasetBuilder)),
-    'reinforcement_neurips2019': ModelURLBuilder('http://www-ens.iro.umontreal.ca/~paquphil/'
-                                                 'benchmarks/neurips2019-rl_model.zip',
-                                                 rl_neurips2019),
-    'supervised_neurips2019': ModelURLBuilder('http://www-ens.iro.umontreal.ca/~paquphil/'
-                                              'benchmarks/neurips2019-sl_model.zip',
-                                              sl_neurips2019)
+class DaidePlayerPlaceHolder():
+    def __init__(self, name=None):
+        self.name = name or self.__class__.__name__
+
+class ModelPlayerURLFactory():
+    def __init__(self, name, policy_adapter, base_dataset_builder, url):
+        self.name = name
+        self.url = url
+        self.policy_adapter = policy_adapter
+        self.base_dataset_builder = base_dataset_builder
+
+    @gen.coroutine
+    def make(self, clean_dir=False):
+        """ Function to download the latest model and create a player """
+        bot_directory = os.path.join(WORKING_DIR, 'data', 'bot_%s' % self.name)
+        bot_model = os.path.join(bot_directory, '%s.zip' % self.name)
+        if clean_dir:
+            shutil.rmtree(bot_directory, ignore_errors=True)
+        os.makedirs(bot_directory, exist_ok=True)
+
+        model_url = self.url
+
+        # Downloading model
+        download_file(model_url, bot_model, force=clean_dir)
+
+        # Unzipping file
+        zip_ref = zipfile.ZipFile(bot_model, 'r')
+        zip_ref.extractall(bot_directory)
+        zip_ref.close()
+
+        serving_port = PORTS_POOL.pop(0)
+        OPEN_PORTS.append(serving_port)
+
+        # Start TF Serving
+        launch_serving(self.name, serving_port)
+
+        # Creating player
+        grpc_dataset = GRPCDataset(hostname='localhost',
+                                   port=serving_port,
+                                   model_name='player',
+                                   signature=self.policy_adapter.get_signature(),
+                                   dataset_builder=self.base_dataset_builder())
+        adapter = self.policy_adapter(grpc_dataset)
+        player = ModelBasedPlayer(adapter,
+                                  noise=NOISE,
+                                  temperature=TEMPERATURE,
+                                  dropout_rate=DROPOUT_RATE,
+                                  use_beam=USE_BEAM,
+                                  name=self.name)
+
+        # Validating openings
+        yield player.check_openings()
+
+        # Returning
+        return player
+
+    @gen.coroutine
+    def create_model_based_player():
+        """ Function to connect to TF Serving server and query orders """
+        serving_port = PORTS_POOL.pop(0)
+        OPEN_PORTS.append(serving_port)
+
+        # Start TF Serving
+        launch_serving(self.name, serving_port)
+
+        # Creating player
+        grpc_dataset = GRPCDataset(hostname='localhost',
+                                   port=serving_port,
+                                   model_name='player',
+                                   signature=self.policy_adapter.get_signature(),
+                                   dataset_builder=self.base_dataset_builder())
+        adapter = self.policy_adapter(grpc_dataset)
+        player = ModelBasedPlayer(adapter,
+                                  noise=NOISE,
+                                  temperature=TEMPERATURE,
+                                  dropout_rate=DROPOUT_RATE,
+                                  use_beam=USE_BEAM)
+
+        # Validating openings
+        yield player.check_openings()
+
+        # Returning player
+        return player
+
+class NonModelPlayerURLFactory():
+    def __init__(self, name, player_ctor):
+        self.name = name
+        self.player_ctor = player_ctor
+
+    @gen.coroutine
+    def make(self):
+        return self.player_ctor(name=self.name)
+
+class PlayerFactory():
+    @staticmethod
+    @gen.coroutine
+    def make_player(type):
+        builder = None
+        builder = MODEL_AI_BUILDER.get(type, None) or NON_MODEL_AI_BUILDER.get(type, None)
+        if builder:
+            player = yield builder.make()
+            return player
+        else:
+            future = Future()
+            future.set_result(None)
+            return future
+
+PLAYER_FACTORIES = {
+    # Model AI
+    'supervised_neurips19':
+        ModelPlayerURLFactory('supervised_neurips19', sl_neurips2019.PolicyAdapter,
+                              sl_neurips2019.BaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-sl_model.zip'),
+    'reinforcement_neurips19':
+        ModelPlayerURLFactory('reinforcement_neurips19', rl_neurips2019.PolicyAdapter,
+                              rl_neurips2019.BaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-rl_model.zip'),
+    'supervised_v001':
+        ModelPlayerURLFactory('supervised_v001', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v001.zip'),
+    'supervised_v002':
+        ModelPlayerURLFactory('supervised_v002', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v002.zip'),
+    'supervised_v003':
+        ModelPlayerURLFactory('supervised_v003', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v003.zip'),
+    'supervised_v004':
+        ModelPlayerURLFactory('supervised_v004', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v004.zip'),
+    'supervised_v005':
+        ModelPlayerURLFactory('supervised_v005', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v005.zip'),
+    'supervised_v006':
+        ModelPlayerURLFactory('supervised_v006', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v006.zip'),
+    'supervised_v007':
+        ModelPlayerURLFactory('supervised_v007', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v007.zip'),
+    'supervised_v008':
+        ModelPlayerURLFactory('supervised_v008', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/sl-model-v008.zip'),
+    # Non model AI
+    'random': NonModelPlayerURLFactory('random', RandomPlayer),
+    'dumbbot': NonModelPlayerURLFactory('dumbbot', lambda name: RuleBasedPlayer(ruleset=dumbbot_ruleset,
+                                                                                name=name)),
+    'easy': NonModelPlayerURLFactory('easy', lambda name: RuleBasedPlayer(ruleset=easy_ruleset,
+                                                                          name=name)),
+    'daide_albert_v6.0.1': NonModelPlayerURLFactory('daide_albert_v6.0.1', DaidePlayerPlaceHolder)
 }
 
-NON_MODEL_AI = {
-    'random': RandomPlayer(),
-    'dumbbot': RuleBasedPlayer(ruleset=dumbbot_ruleset),
-    'easy': RuleBasedPlayer(ruleset=easy_ruleset)
-}
+def get_server():
+    global _server
+    return _server
 
 def start_server(io_loop):
     global _server
@@ -87,6 +228,22 @@ def start_server(io_loop):
 
     _server = Server()
     _server.start(port=MAIN_PORT, io_loop=io_loop)
+
+@gen.coroutine
+def get_client_channel():
+    global _server
+    global _client_channel
+
+    client_channel = None
+
+    if _client_channel is None:
+        username = 'user'
+        password = 'password'
+        connection = yield connect(HOSTNAME, MAIN_PORT)
+        _client_channel = yield connection.authenticate(
+            username, password, create_user=not _server.users.has_user(username, password))
+
+    return _client_channel
 
 def get_unsync_wait():
     global _unsync_wait
@@ -119,11 +276,11 @@ def launch_serving(model_name, serving_port):
     kill_subprocesses_on_exit()
 
     # Waiting for port to be opened.
-    for attempt_ix in range(30):
+    for attempt_idx in range(30):
         time.sleep(10)
         if is_port_opened(serving_port):
             break
-        LOGGER.info('Waiting for TF Serving to come online. - Attempt %d / %d', attempt_ix + 1, 30)
+        LOGGER.info('Waiting for TF Serving to come online. - Attempt %d / %d', attempt_idx + 1, 30)
     else:
         LOGGER.error('TF Serving is not online after 5 minutes. Aborting.')
         raise RuntimeError()
@@ -221,6 +378,29 @@ def create_player(model_name, model_url_builder, clean_dir=True):
     # Returning
     return player
 
+def compute_ranking(power_names, nb_centers, elimination_orders):
+    ranking_data = list(zip(power_names, nb_centers, elimination_orders))
+    # ording based on nb_centers
+    ranking_data.sort(key=lambda element: -element[1])
+    ranking = [0] * 7
+    for i, (power_name, nb_centers, _) in enumerate(ranking_data):
+        rank = max(ranking) + 1
+        if i > 0:
+            previous_power_name, previous_nb_centers, _ = ranking_data[i - 1]
+            if nb_centers == previous_nb_centers:
+                rank = ranking[power_names.index(previous_power_name)]
+
+        ranking[power_names.index(power_name)] = rank
+
+    for i, (power_name, nb_centers, elimination_order) in enumerate(ranking_data):
+        if i > 0:
+            previous_power_name, previous_nb_centers, _ = ranking_data[i - 1]
+            if elimination_order:
+                ranking[power_names.index(power_name)] += \
+                    max(elimination_orders) - elimination_order
+
+    return ranking
+
 @gen.coroutine
 def generate_gym_game(players, progress_bar):
     """ Generate a game """
@@ -233,6 +413,8 @@ def generate_gym_game(players, progress_bar):
     env.reset()
     powers = env.get_all_powers_name()
 
+    elimination_orders = {"_0": 0}
+
     yield gen.sleep(get_unsync_wait())
 
     while not env.is_done:
@@ -241,10 +423,22 @@ def generate_gym_game(players, progress_bar):
             env.step((power_name, power_orders))
         env.process()
 
+        elimination_order = max(elimination_orders.values()) + 1
+        for power_name in powers:
+            if power_name not in elimination_orders and not env.game.get_power(power_name).units:
+                elimination_orders[power_name] = elimination_order
+
+    elimination_orders = [elimination_orders.get(power_name, 0) for power_name in powers]
+    nb_centers = [len(env.game.get_power(power_name).centers) for power_name in powers]
+
     # Returning game
+
     game = env.get_saved_game()
+
     game['assigned_powers'] = powers
+    game['ranking'] = compute_ranking(powers, nb_centers, elimination_orders)
     progress_bar.update()
+
     return game
 
 @gen.coroutine
@@ -258,8 +452,9 @@ def generate_daide_game(players, progress_bar, daide_rules):
     players_ordering = list(range(len(players)))
     shuffle(players_ordering)
     power_names = Map().powers
-    clients = {power_names[idx]: player for idx, player in zip(players_ordering, players)}
-    nb_daide_players = len([_ for _, (player, _) in clients.items() if not isinstance(player, Player)])
+    power_names = [power_names[idx] for idx in players_ordering]
+    clients = {power_name: player for power_name, player in zip(power_names, players)}
+    nb_daide_players = len([_ for _, (player, _) in clients.items() if isinstance(player, DaidePlayerPlaceHolder)])
     nb_regular_players = 1
 
     server_game = ServerGame(n_controls=nb_daide_players + nb_regular_players,
@@ -273,10 +468,10 @@ def generate_daide_game(players, progress_bar, daide_rules):
     for power_name, (player, channel) in clients.items():
         if channel:
             game = yield channel.join_game(game_id=server_game.game_id, power_name=power_name)
-            reg_power_name, reg_client = power_name, ClientPlayer(player, game)
+            reg_power_name, reg_client = power_name, ClientWrapper(player, game)
             clients[power_name] = reg_client
         elif isinstance(player, Player):
-            server_game.get_power(power_name).set_controlled(type(player).__name__)
+            server_game.get_power(power_name).set_controlled(player.name)
 
     if nb_daide_players:
         server_port = PORTS_POOL.pop(0)
@@ -285,15 +480,15 @@ def generate_daide_game(players, progress_bar, daide_rules):
         yield gen.sleep(1)
 
         for power_name, (player, _) in clients.items():
-            if not isinstance(player, Player):
+            if isinstance(player, DaidePlayerPlaceHolder):
                 process = launch_daide_client(server_port)
-                clients[power_name] = DaidePlayer(player, process)
+                clients[power_name] = DaideWrapper(player, process)
 
-    for attempt_ix in range(30):
-        yield gen.sleep(10)
+    for attempt_idx in range(30):
         if server_game.count_controlled_powers() == len(power_names):
             break
-        LOGGER.info('Waiting for DAIDE to connect. - Attempt %d / %d', attempt_ix + 1, 30)
+        yield gen.sleep(10)
+        LOGGER.info('Waiting for DAIDE to connect. - Attempt %d / %d', attempt_idx + 1, 30)
     else:
         LOGGER.error('DAIDE is not online after 5 minutes. Aborting.')
         raise RuntimeError()
@@ -308,16 +503,18 @@ def generate_daide_game(players, progress_bar, daide_rules):
     local_powers = [power_name for power_name, (player, game) in clients.items()
                     if not game and isinstance(player, Player)]
 
+    elimination_orders = {"_0": 0}
+
     yield gen.sleep(get_unsync_wait())
 
     try:
-        phase = PhaseSplit.split(reg_client.game.get_current_phase())
-        watched_game = reg_client.game
+        phase = PhaseSplit.split(reg_client.channel_game.get_current_phase())
+        watched_game = reg_client.channel_game
         while watched_game.status != strings.COMPLETED and phase.year < max_year:
             print('\n=== NEW PHASE ===\n')
             print(watched_game.get_current_phase())
 
-            yield reg_client.game.wait()
+            yield reg_client.channel_game.wait()
 
             players_orders = yield [player.get_orders(server_game, power_name)
                                     for power_name, (player, _) in clients.items() if power_name in local_powers]
@@ -331,18 +528,22 @@ def generate_daide_game(players, progress_bar, daide_rules):
             while not server_game.get_power(reg_power_name).order_is_set:
                 orders = yield reg_client.player.get_orders(server_game, reg_power_name)
                 print('Sending orders')
-                yield reg_client.game.set_orders(orders=orders)
+                yield reg_client.channel_game.set_orders(orders=orders)
 
             print('All orders sent')
 
-            yield reg_client.game.no_wait()
+            yield reg_client.channel_game.no_wait()
 
             while phase.in_str == watched_game.get_current_phase():
                 print('Waiting for the phase to be processed')
                 yield gen.sleep(10)
 
-            if not reg_client.game.power.units:
-                watched_game = server_game
+            elimination_order = max(elimination_orders.values()) + 1
+            for power_name in power_names:
+                if power_name not in elimination_orders and not server_game.get_power(power_name).units:
+                    elimination_orders[power_name] = elimination_order
+                    if power_name == reg_power_name:
+                        watched_game = server_game
 
             if watched_game.get_current_phase().lower() == strings.COMPLETED:
                 break
@@ -357,18 +558,25 @@ def generate_daide_game(players, progress_bar, daide_rules):
         _server.stop_daide_server(server_game.game_id)
         yield gen.sleep(1)
         for power_name, (player, _) in clients.items():
-            if not isinstance(player, Player):
+            if isinstance(player, DaidePlayerPlaceHolder):
                 process = clients[power_name].process
                 process.kill()
         if reg_client:
-            reg_client.game.leave()
+            reg_client.channel_game.leave()
 
     game = None
+    saved_game = to_saved_game_format(server_game)
+
     if server_game.status == strings.COMPLETED or PhaseSplit.split(server_game.get_current_phase()).year >= max_year:
-        game = to_saved_game_format(server_game)
-        game['assigned_powers'] = list(clients.keys())
-        with open('game_{}.json'.format(game['id']), 'w') as file:
-            json.dump(game, file)
+        elimination_orders = [elimination_orders.get(power_name, 0) for power_name in power_names]
+        nb_centers = [len(server_game.get_power(power_name).centers) for power_name in power_names]
+
+        game = saved_game
+        game['assigned_powers'] = power_names
+        game['ranking'] = compute_ranking(power_names, nb_centers, elimination_orders)
+
+    with open('game_{}.json'.format(saved_game['id']), 'w') as file:
+        json.dump(saved_game, file)
 
     progress_bar.update()
 
@@ -377,61 +585,40 @@ def generate_daide_game(players, progress_bar, daide_rules):
 def get_stats(games):
     """ Computes stats """
     nb_won, nb_most, nb_survived, nb_defeated = 0, 0, 0, 0
-    power_assignations = {power_name: 0 for power_name in Map().powers}
+    assigned_powers, rankings = [], []
 
     for game in games:
         if not game:
             continue
 
-        assigned_powers = game['assigned_powers']
+        game_assigned_powers = game['assigned_powers']
         nb_centers = {power_name: len(game['phases'][-1]['state']['centers'][power_name])
-                      for power_name in assigned_powers}
-        if nb_centers[assigned_powers[0]] >= 18:
+                      for power_name in game_assigned_powers}
+        if nb_centers[game_assigned_powers[0]] >= 18:
             nb_won += 1
-        elif nb_centers[assigned_powers[0]] == max(nb_centers.values()):
+        elif nb_centers[game_assigned_powers[0]] == max(nb_centers.values()):
             nb_most += 1
-        elif nb_centers[assigned_powers[0]] > 0:
+        elif nb_centers[game_assigned_powers[0]] > 0:
             nb_survived += 1
         else:
             nb_defeated += 1
-        power_assignations[assigned_powers[0]] += 1
 
-    return nb_won, nb_most, nb_survived, nb_defeated, power_assignations
+        assigned_powers.append(game_assigned_powers)
+        rankings.append(game['ranking'])
+
+    return nb_won, nb_most, nb_survived, nb_defeated, assigned_powers, rankings
 
 @gen.coroutine
-def run_benchmark(generate_game, name, nb_games, player_a, player_b):
-    """ Runs a benchmark (1 player A vs 6 players B)
-        :param name: Name of the benchmark
-        :param nb_games: The number of games to use in the benchmark
-        :param player_a: The player A
-        :param player_b: The player B
-        :return: Nothing, but displays stats
+def run_benchmark(generate_game, name, player_names, players, progress_bar, nb_games):
+    """ Runs a benchmark
     """
     global _server
 
-    players = [player_a, player_b, player_b, player_b, player_b, player_b, player_b]
-    progress_bar = tqdm(total=nb_games)
-
-    if _server and _server.backend is not None:
-        players = [ClientPlayer(player, None) for player in players]
-
-        for i in range(len(players)):
-            player, _ = players[i]
-            if isinstance(player, Player):
-                username = 'user'
-                password = 'password'
-                connection = yield connect(HOSTNAME, MAIN_PORT)
-                channel = yield connection.authenticate(username, password,
-                                                        create_user=not _server.users.has_user(username, password))
-                players[i] = ClientPlayer(player, channel)
-                break
-
     # Generating games
-    reset_unsync_wait()
     games = yield [generate_game(players, progress_bar) for _ in range(nb_games)]
 
     # Computing stats
-    nb_won, nb_most, nb_survived, nb_defeated, power_assignations = get_stats(games)
+    nb_won, nb_most, nb_survived, nb_defeated, assigned_powers, rankings = get_stats(games)
 
     nb_completed_games = len([_ for _ in games if _ is not None])
 
@@ -444,6 +631,9 @@ def run_benchmark(generate_game, name, nb_games, player_a, player_b):
     print('Games Most SC: (%d) (%.2f)' % (nb_most, 100. * nb_most / nb_completed_games))
     print('Games Survived: (%d) (%.2f)' % (nb_survived, 100. * nb_survived / nb_completed_games))
     print('Games Defeated: (%d) (%.2f)' % (nb_defeated, 100. * nb_defeated / nb_completed_games))
-    for power_name, nb_assignations in power_assignations.items():
-        print('Played as %s: (%d) (%.2f)' % (power_name, nb_assignations, 100. * nb_assignations / nb_completed_games))
+    for player_index, player_name in enumerate(player_names):
+        print('Player %s played as [%s]' % (player_name,
+                                            ','.join([powers[player_index] for powers in assigned_powers])))
+        print('Player %s ranked [%s]' % (player_name,
+                                         ','.join([str(ranking[player_index]) for ranking in rankings])))
     print('-' * 80+'\n')
