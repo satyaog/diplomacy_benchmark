@@ -534,9 +534,19 @@ def generate_daide_game(players, progress_bar, daide_rules):
 
             yield reg_client.channel_game.no_wait()
 
-            while phase.in_str == watched_game.get_current_phase():
-                print('Waiting for the phase to be processed')
-                yield gen.sleep(10)
+            for attempt_idx in range(120):
+                if phase.in_str != watched_game.get_current_phase() or \
+                        server_game.status != strings.ACTIVE:
+                    break
+                if (attempt_idx + 1) % 12 == 0 and phase.in_str != server_game.get_current_phase():
+                    # Watched game is unsynched
+                    watched_game = server_game
+                    break
+                LOGGER.info('Waiting for the phase to be processed. - Attempt %d / %d', attempt_idx + 1, 120)
+                yield gen.sleep(2.5)
+            else:
+                LOGGER.error('Phase is taking too long to process. Aborting.')
+                raise RuntimeError()
 
             elimination_order = max(elimination_orders.values()) + 1
             for power_name in power_names:
@@ -545,7 +555,7 @@ def generate_daide_game(players, progress_bar, daide_rules):
                     if power_name == reg_power_name:
                         watched_game = server_game
 
-            if watched_game.get_current_phase().lower() == strings.COMPLETED:
+            if server_game.status != strings.ACTIVE:
                 break
 
             phase = PhaseSplit.split(watched_game.get_current_phase())
