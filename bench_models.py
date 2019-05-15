@@ -6,11 +6,12 @@ from tornado import ioloop, gen
 from diplomacy_research.players.player import Player
 from diplomacy_research.utils.cluster import is_port_opened, kill_processes_using_port, stop_io_loop
 
-from stats.cross_support_stats import print_cross_support_stats
-from stats.ranking_stats import print_ranking_stats
 from bench import generate_daide_game, generate_gym_game, \
                   get_client_channel, start_server, \
                   reset_unsync_wait, run_benchmark, PLAYER_FACTORIES, OPEN_PORTS, ClientWrapper
+from stats.cross_convoy_stats import print_cross_convoy_stats
+from stats.cross_support_stats import print_cross_support_stats
+from stats.ranking_stats import print_ranking_stats
 
 IO_LOOP = None
 
@@ -19,11 +20,13 @@ def _get_benchmark_args(ai_1, ai_2, args):
     name = '1[{}]v6[{}]'.format(ai_1.name, ai_2.name)
     players = [ai_1, ai_2, ai_2, ai_2, ai_2, ai_2, ai_2]
 
-    if args.stats == 'ranking':
+    if args.stats == 'cross_convoy':
+        stats_callback = lambda games: print_cross_convoy_stats(name, games)
+    elif args.stats == 'cross_support':
+        stats_callback = lambda games: print_cross_support_stats(name, games)
+    elif args.stats == 'ranking':
         player_names = [player.name for player in players]
         stats_callback = lambda games: print_ranking_stats(name, games, player_names)
-    else:
-        stats_callback = lambda games: print_cross_support_stats(name, games)
 
     if 'daide' in args.ai_1 + args.ai_2:
         players = [ClientWrapper(player, None) for player in players]
@@ -80,8 +83,12 @@ if __name__ == '__main__':
                         help='ai choices: ' + ' | '.join(ai_names))
     parser.add_argument('--games', default=10, type=int,
                         help='number of pair of games to run (default: 10)')
-    parser.add_argument('--stats', default='ranking', choices=['ranking', 'cross_support'],
-                        help='the stats to get: ' + ' | '.join(['ranking', 'cross_support']))
+    parser.add_argument('--stats', default='ranking', choices=['cross_convoy',
+                                                               'cross_support',
+                                                               'ranking'],
+                        help='the stats to get: ' + ' | '.join(['cross_convoy',
+                                                                'cross_support',
+                                                                'ranking']))
     parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE', help='Game rules')
     args = parser.parse_args()
 

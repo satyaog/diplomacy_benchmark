@@ -7,10 +7,10 @@ from tqdm import tqdm
 from diplomacy_research.players.player import Player
 from diplomacy_research.utils.cluster import is_port_opened, kill_processes_using_port, stop_io_loop
 
-from stats.ranking_stats import print_ranking_stats
 from bench import generate_daide_game, generate_gym_game, \
                   get_client_channel, start_server, \
                   reset_unsync_wait, run_benchmark, PLAYER_FACTORIES, OPEN_PORTS, ClientWrapper
+from stats.ranking_stats import print_ranking_stats
 
 IO_LOOP = None
 
