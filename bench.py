@@ -62,11 +62,14 @@ class DaidePlayerPlaceHolder():
         self.name = name or self.__class__.__name__
 
 class ModelPlayerURLFactory():
-    def __init__(self, name, policy_adapter, base_dataset_builder, url):
+    def __init__(self, name, policy_adapter, base_dataset_builder, url,
+                 temperature=TEMPERATURE, use_beam=USE_BEAM):
         self.name = name
         self.url = url
         self.policy_adapter = policy_adapter
         self.base_dataset_builder = base_dataset_builder
+        self.temperature = temperature
+        self.use_beam = use_beam
 
     @gen.coroutine
     def make(self, clean_dir=False):
@@ -102,9 +105,9 @@ class ModelPlayerURLFactory():
         adapter = self.policy_adapter(grpc_dataset)
         player = ModelBasedPlayer(adapter,
                                   noise=NOISE,
-                                  temperature=TEMPERATURE,
+                                  temperature=self.temperature,
                                   dropout_rate=DROPOUT_RATE,
-                                  use_beam=USE_BEAM,
+                                  use_beam=self.use_beam,
                                   name=self.name)
 
         # Validating openings
@@ -171,6 +174,18 @@ PLAYER_FACTORIES = {
                               sl_neurips2019.BaseDatasetBuilder,
                               'https://f002.backblazeb2.com/file/ppaquette-public'
                               '/benchmarks/neurips2019-sl_model.zip'),
+    'supervised_neurips19_temp1_nobeam':
+        ModelPlayerURLFactory('supervised_neurips19_temp1_nobeam', sl_neurips2019.PolicyAdapter,
+                              sl_neurips2019.BaseDatasetBuilder,
+                              temperature=1,
+                              url='https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-sl_model.zip'),
+    'supervised_neurips19_temp1_beam':
+        ModelPlayerURLFactory('supervised_neurips19_temp1_beam', sl_neurips2019.PolicyAdapter,
+                              sl_neurips2019.BaseDatasetBuilder,
+                              temperature=1, use_beam=True,
+                              url='https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-sl_model.zip'),
     'reinforcement_neurips19':
         ModelPlayerURLFactory('reinforcement_neurips19', rl_neurips2019.PolicyAdapter,
                               rl_neurips2019.BaseDatasetBuilder,
@@ -208,6 +223,46 @@ PLAYER_FACTORIES = {
         ModelPlayerURLFactory('supervised_v008', OrderPolicyAdapter, OrderBaseDatasetBuilder,
                               'https://f002.backblazeb2.com/file/ppaquette-public'
                               '/benchmarks/history/sl-model-v008.zip'),
+    'without_film':
+        ModelPlayerURLFactory('without_film', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/003_without_film.zip'),
+    'gcn_8_layers':
+        ModelPlayerURLFactory('gcn_8_layers', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/004_gcn_8_layers.zip'),
+    'gcn_4_layers':
+        ModelPlayerURLFactory('gcn_4_layers', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/005_gcn_4_layers.zip'),
+    'gcn_2_layers':
+        ModelPlayerURLFactory('gcn_2_layers', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/006_gcn_2_layers.zip'),
+    'no_board':
+        ModelPlayerURLFactory('no_board', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/007_no_board.zip'),
+    'board_only':
+        ModelPlayerURLFactory('board_only', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/008_board_only.zip'),
+    'avg_embedding':
+        ModelPlayerURLFactory('avg_embedding', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/009_avg_embedding.zip'),
+    'transformer_order_based':
+        ModelPlayerURLFactory('transformer_order_based', OrderPolicyAdapter, OrderBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/010_transformer_order_based.zip'),
+    'lstm_token_based':
+        ModelPlayerURLFactory('lstm_token_based', TokenPolicyAdapter, TokenBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/011_lstm_token_based.zip'),
+    'transformer_token_based':
+        ModelPlayerURLFactory('transformer_token_based', TokenPolicyAdapter, TokenBaseDatasetBuilder,
+                              'https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/history/012_transformer_token_based.zip'),
     # Non model AI
     'random': NonModelPlayerURLFactory('random', RandomPlayer),
     'dumbbot': NonModelPlayerURLFactory('dumbbot', lambda name: RuleBasedPlayer(ruleset=dumbbot_ruleset,

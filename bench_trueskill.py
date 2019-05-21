@@ -24,7 +24,8 @@ def main():
 
     yield gen.sleep(2)
     try:
-        players_choices = yield {name: factory.make() for name, factory in PLAYER_FACTORIES.items()}
+        players_choices = yield {name: factory.make() for name, factory in PLAYER_FACTORIES.items()
+                                                      if not args.exclude_daide or 'daide' not in name}
 
         gym_benchmark_kwargs = []
         daide_benchmark_kwargs = []
@@ -100,12 +101,15 @@ if __name__ == '__main__':
                         help='number of games to run')
     parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE',
                         help='Game rules')
+    parser.add_argument('--exclude-daide', default=False, action='store_true',
+                        help='Exclude DAIDE models')
     parser.add_argument('--seed', default=None, type=int, help='Seed to use')
     args = parser.parse_args()
 
     args.rules = args.rules.split(',')
 
-    print('--games=[{}] --rules=[{}] --seed=[{}]'.format(args.games, args.rules, args.seed))
+    print('--games=[{}] --rules=[{}] --exclude-daide=[{}] --seed=[{}]'
+          .format(args.games, args.rules, args.exclude_daide, args.seed))
 
     IO_LOOP = ioloop.IOLoop.instance()
     IO_LOOP.spawn_callback(main)
