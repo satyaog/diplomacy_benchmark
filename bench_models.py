@@ -97,13 +97,14 @@ if __name__ == '__main__':
     parser.add_argument('--ai-2', default='random', choices=ai_names,
                         help='One of the following ai choices: ' + ' | '.join(ai_names))
     parser.add_argument('--games', default=10, type=int,
-                        help='number of pair of games to run (default: 10)')
-    parser.add_argument('--stats', default='',
+                        help='number of pair of games to run')
+    parser.add_argument('--stats', default='ranking',
                         help='a comma separated list of stats to get: ' +
                              ' | '.join(['cross_convoy',
                                          'cross_support',
                                          'ranking']))
-    parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE', help='Game rules')
+    parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE',
+                        help='Game rules')
     args = parser.parse_args()
 
     args.stats = args.stats.split(',')

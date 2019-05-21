@@ -98,7 +98,8 @@ if __name__ == '__main__':
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--games', default=10, type=int,
                         help='number of games to run')
-    parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE', help='Game rules')
+    parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE',
+                        help='Game rules')
     parser.add_argument('--seed', default=None, type=int, help='Seed to use')
     args = parser.parse_args()
 
