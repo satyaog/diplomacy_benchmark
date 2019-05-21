@@ -1,7 +1,10 @@
 import argparse
+import glob
+import os
 import random
 
 from tornado import ioloop, gen
+import ujson as json
 
 from diplomacy_research.players.player import Player
 from diplomacy_research.utils.cluster import is_port_opened, kill_processes_using_port, stop_io_loop
@@ -103,6 +106,9 @@ if __name__ == '__main__':
                              ' | '.join(['cross_convoy',
                                          'cross_support',
                                          'ranking']))
+    parser.add_argument('--existing-games-dir', default=None,
+                        help='the directory containing the games to load instead '
+                             'of running new games')
     parser.add_argument('--rules', default='NO_PRESS,IGNORE_ERRORS,POWER_CHOICE',
                         help='Game rules')
     args = parser.parse_args()
@@ -110,17 +116,41 @@ if __name__ == '__main__':
     args.stats = args.stats.split(',')
     args.rules = args.rules.split(',')
 
-    print('--ai-1=[{}] --ai-2=[{}] --games=[{}] --stats=[{}] --rules=[{}]'
-          .format(args.ai_1, args.ai_2, args.games, args.stats, args.rules))
+    print('--ai-1=[{}] --ai-2=[{}] --games=[{}] --stats=[{}] --existing-games-dir=[{}] --rules=[{}]'
+          .format(args.ai_1, args.ai_2, args.games, args.stats, args.existing_games_dir, args.rules))
 
-    IO_LOOP = ioloop.IOLoop.instance()
-    IO_LOOP.spawn_callback(main)
-    try:
-        start_server(IO_LOOP)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        stop_io_loop(IO_LOOP)
-        for port in OPEN_PORTS:
-            if is_port_opened(port):
-                kill_processes_using_port(port, force=True)
+    if args.existing_games_dir:
+        glob_pattern = os.path.join(args.existing_games_dir, "game_*.json")
+        games = []
+        filenames = glob.glob(glob_pattern)
+        for filename in filenames:
+            with open(filename, "r") as file:
+                content = file.read()
+            games.append(json.loads(content.rstrip('\n')))
+
+        callbacks = []
+        name = os.path.abspath(glob_pattern)
+        for stats_name in args.stats:
+            if stats_name == 'cross_convoy':
+                stats_callback = lambda games: print_cross_convoy_stats(name, games)
+            elif stats_name == 'cross_support':
+                stats_callback = lambda games: print_cross_support_stats(name, games)
+            else:
+                continue
+
+            callbacks.append(stats_callback)
+
+        callback_array(games, callbacks)
+
+    else:
+        IO_LOOP = ioloop.IOLoop.instance()
+        IO_LOOP.spawn_callback(main)
+        try:
+            start_server(IO_LOOP)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            stop_io_loop(IO_LOOP)
+            for port in OPEN_PORTS:
+                if is_port_opened(port):
+                    kill_processes_using_port(port, force=True)
