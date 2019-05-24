@@ -153,20 +153,6 @@ class NonModelPlayerURLFactory():
     def make(self):
         return self.player_ctor(name=self.name)
 
-class PlayerFactory():
-    @staticmethod
-    @gen.coroutine
-    def make_player(type):
-        builder = None
-        builder = MODEL_AI_BUILDER.get(type, None) or NON_MODEL_AI_BUILDER.get(type, None)
-        if builder:
-            player = yield builder.make()
-            return player
-        else:
-            future = Future()
-            future.set_result(None)
-            return future
-
 PLAYER_FACTORIES = {
     # Model AI
     'supervised_neurips19':
@@ -352,24 +338,6 @@ def launch_serving(model_name, serving_port):
         LOGGER.error('Unable to set the configuration file.')
 
 @gen.coroutine
-def check_serving(player):
-    """ Makes sure the current serving process is still active, otherwise restarts it.
-        :param player: A player object to query the server
-    """
-    game = Game()
-
-    # Trying to check orders
-    for _ in range(MAX_SENTINEL_CHECKS):
-        orders = yield player.get_orders(game, 'FRANCE')
-        if orders:
-            return
-
-    # Could not get orders x times in a row, restarting process
-    LOGGER.warning('Could not retrieve orders from the serving process after %d attempts.', MAX_SENTINEL_CHECKS)
-    LOGGER.warning('Restarting TF serving server.')
-    launch_serving()
-
-@gen.coroutine
 def create_model_based_player(model_name, adapter_ctor, dataset_builder_ctor):
     """ Function to connect to TF Serving server and query orders """
     serving_port = PORTS_POOL.pop(0)
@@ -395,43 +363,6 @@ def create_model_based_player(model_name, adapter_ctor, dataset_builder_ctor):
     yield player.check_openings()
 
     # Returning player
-    return player
-
-@gen.coroutine
-def create_player(model_name, model_url_builder, clean_dir=True):
-    """ Function to download the latest model and create a player """
-    bot_directory = os.path.join(WORKING_DIR, 'data', 'bot_%s' % model_name)
-    bot_model = os.path.join(bot_directory, '%s.zip' % model_name)
-    if clean_dir:
-        shutil.rmtree(bot_directory, ignore_errors=True)
-    os.makedirs(bot_directory, exist_ok=True)
-
-    model_url = model_url_builder.url
-
-    # Downloading model
-    download_file(model_url, bot_model, force=clean_dir)
-
-    # Unzipping file
-    zip_ref = zipfile.ZipFile(bot_model, 'r')
-    zip_ref.extractall(bot_directory)
-    zip_ref.close()
-
-    # Detecting model type
-    if os.path.exists(os.path.join(bot_directory, 'order_based.txt')):
-        policy_adapter = model_url_builder.builder.PolicyAdapter
-        dataset_builder = model_url_builder.builder.BaseDatasetBuilder
-        LOGGER.info('Creating order-based player.')
-        player = yield create_model_based_player(model_name, policy_adapter, dataset_builder)
-
-    elif os.path.exists(os.path.join(bot_directory, 'token_based.txt')):
-        LOGGER.info('Creating token-based player.')
-        player = yield create_model_based_player(model_name, TokenPolicyAdapter, TokenBaseDatasetBuilder)
-
-    else:
-        LOGGER.info('Creating rule-based player')
-        player = RuleBasedPlayer(ruleset=easy_ruleset)
-
-    # Returning
     return player
 
 def compute_ranking(power_names, nb_centers, elimination_orders):
