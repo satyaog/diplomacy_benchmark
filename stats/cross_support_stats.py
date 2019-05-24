@@ -116,7 +116,7 @@ def print_cross_support_stats(benchmark_name, games):
     total_nb_supports, total_nb_cross_supports, total_nb_effective_cross_supports = 0, 0, 0
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        for result in executor.map(compute_ratio, [game for game in games if game is not None]):
+        for result in tqdm(executor.map(compute_ratio, [game for game in games if game is not None])):
             nb_supports, nb_cross_supports, nb_effective_cross_supports = result
             total_nb_supports += nb_supports
             total_nb_cross_supports += nb_cross_supports

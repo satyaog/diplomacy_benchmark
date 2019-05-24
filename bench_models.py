@@ -21,8 +21,6 @@ def callback_array(games, callbacks):
     for cb in callbacks:
         cb(games)
 
-IO_LOOP = None
-
 @gen.coroutine
 def _get_benchmark_args(ai_1, ai_2, args):
     name = '1[{}]v6[{}]'.format(ai_1.name, ai_2.name)
@@ -31,14 +29,13 @@ def _get_benchmark_args(ai_1, ai_2, args):
     callbacks = []
     for stats_name in args.stats:
         if stats_name == 'save_games':
-            stats_callback = save_games
+            stats_callback = lambda games: save_games(args.save_dir, games)
         elif stats_name == 'cross_convoy':
             stats_callback = lambda games: print_cross_convoy_stats(name, games)
         elif stats_name == 'cross_support':
             stats_callback = lambda games: print_cross_support_stats(name, games)
         elif stats_name == 'ranking':
-            player_names = [player.name for player in players]
-            stats_callback = lambda games: print_ranking_stats(name, games, player_names)
+            stats_callback = lambda games: print_ranking_stats(name, games)
         else:
             continue
 
@@ -63,6 +60,8 @@ def _get_benchmark_args(ai_1, ai_2, args):
 
     return (game_generator, players, args.games, callback)
 
+IO_LOOP = None
+
 @gen.coroutine
 def main():
     """ Entry point """
@@ -78,10 +77,6 @@ def main():
             ai_2 = yield PLAYER_FACTORIES[args.ai_2].make()
 
         game_generator, players, games, callback = yield _get_benchmark_args(ai_1, ai_2, args)
-        reset_unsync_wait()
-        yield run_benchmark(game_generator, players, games, stats_callback=callback)
-
-        game_generator, players, games, callback = yield _get_benchmark_args(ai_2, ai_1, args)
         reset_unsync_wait()
         yield run_benchmark(game_generator, players, games, stats_callback=callback)
 
@@ -106,6 +101,8 @@ if __name__ == '__main__':
                              ' | '.join(['cross_convoy',
                                          'cross_support',
                                          'ranking']))
+    parser.add_argument('--save-dir', default=None,
+                        help='the directory to save games')
     parser.add_argument('--existing-games-dir', default=None,
                         help='the directory containing the games to load instead '
                              'of running new games')
@@ -113,20 +110,30 @@ if __name__ == '__main__':
                         help='Game rules')
     args = parser.parse_args()
 
-    args.stats = args.stats.split(',')
-    args.rules = args.rules.split(',')
+    args.stats = [stat for stat in args.stats.split(',') if stat]
+    args.rules = [rule for rule in args.rules.split(',') if rule]
 
-    print('--ai-1=[{}] --ai-2=[{}] --games=[{}] --stats=[{}] --existing-games-dir=[{}] --rules=[{}]'
-          .format(args.ai_1, args.ai_2, args.games, args.stats, args.existing_games_dir, args.rules))
+    if args.save_dir:
+        args.stats = ['save_games'] + args.stats
 
     if args.existing_games_dir:
-        glob_pattern = os.path.join(args.existing_games_dir, "game_*.json")
         games = []
+        glob_pattern = os.path.join(args.existing_games_dir, "game_*.json")
         filenames = glob.glob(glob_pattern)
         for filename in filenames:
             with open(filename, "r") as file:
                 content = file.read()
             games.append(json.loads(content.rstrip('\n')))
+
+        args.ai_1 = None
+        args.ai_2 = None
+        args.games = len(games)
+        try: args.stats.remove('save_games')
+        except ValueError: pass
+        args.save_dir = None
+        args.rules = None
+        print('--ai-1=[{}] --ai-2=[{}] --games=[{}] --stats=[{}] --save-dir=[{}] --existing-games-dir=[{}] --rules=[{}]'
+              .format(args.ai_1, args.ai_2, args.games, args.stats, args.save_dir, args.existing_games_dir, args.rules))
 
         callbacks = []
         name = os.path.abspath(glob_pattern)
@@ -135,6 +142,8 @@ if __name__ == '__main__':
                 stats_callback = lambda games: print_cross_convoy_stats(name, games)
             elif stats_name == 'cross_support':
                 stats_callback = lambda games: print_cross_support_stats(name, games)
+            elif stats_name == 'ranking':
+                stats_callback = lambda games: print_ranking_stats(name, games)
             else:
                 continue
 
@@ -143,6 +152,9 @@ if __name__ == '__main__':
         callback_array(games, callbacks)
 
     else:
+        print('--ai-1=[{}] --ai-2=[{}] --games=[{}] --stats=[{}] --save-dir=[{}] --existing-games-dir=[{}] --rules=[{}]'
+              .format(args.ai_1, args.ai_2, args.games, args.stats, args.save_dir, args.existing_games_dir, args.rules))
+
         IO_LOOP = ioloop.IOLoop.instance()
         IO_LOOP.spawn_callback(main)
         try:
