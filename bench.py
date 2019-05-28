@@ -172,6 +172,24 @@ PLAYER_FACTORIES = {
                               temperature=1, use_beam=True,
                               url='https://f002.backblazeb2.com/file/ppaquette-public'
                               '/benchmarks/neurips2019-sl_model.zip'),
+    'supervised_neurips19_temp0.5_beam':
+        ModelPlayerURLFactory('supervised_neurips19_temp0.5_beam', sl_neurips2019.PolicyAdapter,
+                              sl_neurips2019.BaseDatasetBuilder,
+                              temperature=0.5, use_beam=True,
+                              url='https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-sl_model.zip'),
+    'supervised_neurips19_temp0.25_beam':
+        ModelPlayerURLFactory('supervised_neurips19_temp0.25_beam', sl_neurips2019.PolicyAdapter,
+                              sl_neurips2019.BaseDatasetBuilder,
+                              temperature=0.25, use_beam=True,
+                              url='https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-sl_model.zip'),
+    'supervised_neurips19_temp0.1_beam':
+        ModelPlayerURLFactory('supervised_neurips19_temp0.1_beam', sl_neurips2019.PolicyAdapter,
+                              sl_neurips2019.BaseDatasetBuilder,
+                              temperature=0.1, use_beam=True,
+                              url='https://f002.backblazeb2.com/file/ppaquette-public'
+                              '/benchmarks/neurips2019-sl_model.zip'),
     'reinforcement_neurips19':
         ModelPlayerURLFactory('reinforcement_neurips19', rl_neurips2019.PolicyAdapter,
                               rl_neurips2019.BaseDatasetBuilder,
