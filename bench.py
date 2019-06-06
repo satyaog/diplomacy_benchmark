@@ -460,7 +460,7 @@ def generate_daide_game(players, progress_bar, daide_rules):
     power_names = [power_names[idx] for idx in players_ordering]
     clients = {power_name: player for power_name, player in zip(power_names, players)}
     nb_daide_players = len([_ for _, (player, _) in clients.items() if isinstance(player, DaidePlayerPlaceHolder)])
-    nb_regular_players = 1
+    nb_regular_players = min(1, len(power_names) - nb_daide_players)
 
     server_game = ServerGame(n_controls=nb_daide_players + nb_regular_players,
                              rules=daide_rules)
@@ -513,13 +513,14 @@ def generate_daide_game(players, progress_bar, daide_rules):
     yield gen.sleep(get_unsync_wait())
 
     try:
-        phase = PhaseSplit.split(reg_client.channel_game.get_current_phase())
-        watched_game = reg_client.channel_game
+        watched_game = reg_client.channel_game if reg_client else server_game
+        phase = PhaseSplit.split(watched_game.get_current_phase())
         while watched_game.status != strings.COMPLETED and phase.year < max_year:
             print('\n=== NEW PHASE ===\n')
             print(watched_game.get_current_phase())
 
-            yield reg_client.channel_game.wait()
+            if reg_client:
+                yield reg_client.channel_game.wait()
 
             players_orders = yield [player.get_orders(server_game, power_name)
                                     for power_name, (player, _) in clients.items() if power_name in local_powers]
@@ -530,14 +531,15 @@ def generate_daide_game(players, progress_bar, daide_rules):
                 orders = [order for order in orders if order != 'WAIVE']
                 server_game.set_orders(power_name, orders, expand=False)
 
-            while not server_game.get_power(reg_power_name).order_is_set:
+            while reg_client and not server_game.get_power(reg_power_name).order_is_set:
                 orders = yield reg_client.player.get_orders(server_game, reg_power_name)
                 print('Sending orders')
                 yield reg_client.channel_game.set_orders(orders=orders)
 
             print('All orders sent')
 
-            yield reg_client.channel_game.no_wait()
+            if reg_client:
+                yield reg_client.channel_game.no_wait()
 
             for attempt_idx in range(120):
                 if phase.in_str != watched_game.get_current_phase() or \
