@@ -17,7 +17,7 @@ from tqdm import tqdm
 import ujson as json
 
 from diplomacy import Game, Map, Server
-from diplomacy.utils.subject_split import PhaseSplit
+from diplomacy.utils.splitter import PhaseSplitter
 from diplomacy.server.server_game import ServerGame
 from diplomacy.client.connection import connect
 from diplomacy.utils import strings
@@ -514,7 +514,7 @@ def generate_daide_game(players, progress_bar, daide_rules):
 
     try:
         watched_game = reg_client.channel_game if reg_client else server_game
-        phase = PhaseSplit.split(watched_game.get_current_phase())
+        phase = PhaseSplitter(watched_game.get_current_phase())
         while watched_game.status != strings.COMPLETED and phase.year < max_year:
             print('\n=== NEW PHASE ===\n')
             print(watched_game.get_current_phase())
@@ -542,10 +542,10 @@ def generate_daide_game(players, progress_bar, daide_rules):
                 yield reg_client.channel_game.no_wait()
 
             for attempt_idx in range(120):
-                if phase.in_str != watched_game.get_current_phase() or \
+                if phase.input_str != watched_game.get_current_phase() or \
                         server_game.status != strings.ACTIVE:
                     break
-                if (attempt_idx + 1) % 12 == 0 and phase.in_str != server_game.get_current_phase():
+                if (attempt_idx + 1) % 12 == 0 and phase.input_str != server_game.get_current_phase():
                     # Watched game is unsynched
                     watched_game = server_game
                     break
@@ -565,7 +565,7 @@ def generate_daide_game(players, progress_bar, daide_rules):
             if server_game.status != strings.ACTIVE:
                 break
 
-            phase = PhaseSplit.split(watched_game.get_current_phase())
+            phase = PhaseSplitter(watched_game.get_current_phase())
 
     except TimeoutError as timeout:
         print('Timeout: ', timeout)
@@ -584,7 +584,7 @@ def generate_daide_game(players, progress_bar, daide_rules):
     game = None
     saved_game = to_saved_game_format(server_game)
 
-    if server_game.status == strings.COMPLETED or PhaseSplit.split(server_game.get_current_phase()).year >= max_year:
+    if server_game.status == strings.COMPLETED or PhaseSplitter(server_game.get_current_phase()).year >= max_year:
         elimination_orders = [elimination_orders.get(power_name, 0) for power_name in power_names]
         nb_centers = [len(server_game.get_power(power_name).centers) for power_name in power_names]
 
