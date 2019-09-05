@@ -17,7 +17,8 @@ def extract_ranking_data(filename):
                         r"^[ \w]+: \(\d+\) \([\d\.]+\)|"                    # Games Won: (0) (0.00)
                         r"^Player ([\w\._]+) [\w ]+\[([A-Z]+)[,A-Z]*\]|"    # Player daide_albert_v6.0.1 played as [ENGLAND]    # \1 \2
                         r"^Player ([\w\._]+) [\w ]+\[(\d+)[,\d]*\]|"        # Player daide_albert_v6.0.1 ranked [1]             # \3 \4
-                        r"^-{80}\n?",                                       # ---...
+                        r"^-{80}\n?|"                                       # ---...
+                        r"^.+\n?",
                         r"\1\n\2\4"),
                        (r"^\n",
                         r""),
@@ -106,7 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("results", metavar="RESULTS_FILE",
                         help="path to the results file. Data file is expected to "
                              "have been extracted with\n"
-                             "> egrep -E -e "^-{80}|^Benchmark|^Games |^Played as |^Player " LOG_FILES*.stats* > RESULTS_FILE")
+                             "> egrep -E -e \"^-{80}|^Benchmark|^Games |^Played as |^Player \" LOG_FILES*.stats* > RESULTS_FILE")
     parser.add_argument("-o", "--output-csv", default=None,
                         help="Save a csv with the TrueSkill ratings")
     args = parser.parse_args()

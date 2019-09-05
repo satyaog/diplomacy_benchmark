@@ -440,6 +440,7 @@ def generate_gym_game(players, progress_bar):
 
     game = env.get_saved_game()
 
+    game['players_names'] = [player.name for player in players]
     game['assigned_powers'] = powers
     game['ranking'] = compute_ranking(powers, nb_centers, elimination_orders)
     progress_bar.update()
@@ -589,6 +590,7 @@ def generate_daide_game(players, progress_bar, daide_rules):
         nb_centers = [len(server_game.get_power(power_name).centers) for power_name in power_names]
 
         game = saved_game
+        game['players_names'] = [player.name for player, _ in players]
         game['assigned_powers'] = power_names
         game['ranking'] = compute_ranking(power_names, nb_centers, elimination_orders)
 

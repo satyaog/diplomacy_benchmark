@@ -8,6 +8,7 @@ def get_stats(games):
     """ Computes stats """
     nb_won, nb_most, nb_survived, nb_defeated = 0, 0, 0, 0
     nb_power_assignations = {power_name: 0 for power_name in Map().powers}
+    players_names = next(iter(games))['players_names']
     assigned_powers, rankings = [], []
 
     for game in games:
@@ -30,10 +31,10 @@ def get_stats(games):
         assigned_powers.append(game_assigned_powers)
         rankings.append(game['ranking'])
 
-    return GamesStats(nb_won, nb_most, nb_survived, nb_defeated, nb_power_assignations, \
-                      assigned_powers, rankings)
+    return players_names, GamesStats(nb_won, nb_most, nb_survived, nb_defeated, \
+                                     nb_power_assignations, assigned_powers, rankings)
 
-def print_ranking_stats(benchmark_name, games, player_names):
+def print_ranking_stats(benchmark_name, games):
     nb_games = len(games)
     nb_completed_games = len([_ for _ in games if _ is not None])
     
@@ -46,7 +47,7 @@ def print_ranking_stats(benchmark_name, games, player_names):
         return
 
     # Computing stats
-    stats = get_stats(games)
+    players_names, stats = get_stats(games)
 
     # Displaying stats
     print('-' * 80)
@@ -58,7 +59,7 @@ def print_ranking_stats(benchmark_name, games, player_names):
     print('Games Defeated: (%d) (%.2f)' % (stats.nb_defeated, 100. * stats.nb_defeated / nb_completed_games))
     for power_name, nb_assignations in stats.nb_power_assignations.items():
         print('Played as %s: (%d) (%.2f)' % (power_name, nb_assignations, 100. * nb_assignations / nb_completed_games))
-    for player_index, player_name in enumerate(player_names):
+    for player_index, player_name in enumerate(players_names):
         print('Player %s played as [%s]' % (player_name,
                                             ','.join([powers[player_index] for powers in stats.assigned_powers])))
         print('Player %s ranked [%s]' % (player_name,
